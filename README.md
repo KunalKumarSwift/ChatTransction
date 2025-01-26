@@ -2,6 +2,9 @@
 
 A web application for analyzing financial transactions, providing insights into subscriptions and monthly spending patterns.
 
+![Screenshot 2025-01-26 at 6 41 38 PM](https://github.com/user-attachments/assets/86b6ae13-9c16-4fd7-ae0e-18d5d7311ebf)
+
+
 ## Features
 
 - Subscription tracking and analysis
