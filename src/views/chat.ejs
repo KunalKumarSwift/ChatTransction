@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Financial AI Assistant</title>
+        <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 20px;
+                background-color: #f5f5f5;
+            }
+
+            #chat-container {
+                height: 500px;
+                overflow-y: auto;
+                border: 1px solid #ccc;
+                padding: 20px;
+                margin-bottom: 20px;
+                background-color: white;
+                border-radius: 5px;
+            }
+
+            .message {
+                margin-bottom: 15px;
+                padding: 10px;
+                border-radius: 5px;
+            }
+
+            .user-message {
+                background-color: #e3f2fd;
+                margin-left: 20%;
+            }
+
+            .ai-message {
+                background-color: #f5f5f5;
+                margin-right: 20%;
+            }
+
+            #input-container {
+                display: flex;
+                gap: 10px;
+            }
+
+            #user-input {
+                flex-grow: 1;
+                padding: 10px;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+            }
+
+            button {
+                padding: 10px 20px;
+                background-color: #2196f3;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                cursor: pointer;
+            }
+
+            button:hover {
+                background-color: #1976d2;
+            }
+
+            table {
+                border-collapse: collapse;
+                width: 100%;
+                margin: 10px 0;
+            }
+
+            th,
+            td {
+                border: 1px solid #ddd;
+                padding: 8px;
+                text-align: left;
+            }
+
+            th {
+                background-color: #f8f9fa;
+            }
+
+            tr:nth-child(even) {
+                background-color: #f8f9fa;
+            }
+
+            pre {
+                background-color: #f8f9fa;
+                padding: 10px;
+                border-radius: 5px;
+                overflow-x: auto;
+            }
+
+            code {
+                background-color: #f8f9fa;
+                padding: 2px 4px;
+                border-radius: 3px;
+            }
+
+        </style>
+    </head>
+    <body>
+        <h1>Financial AI Assistant</h1>
+        <div id="chat-container"></div>
+        <div id="input-container">
+            <input type="text" id="user-input" placeholder="Ask about your finances...">
+            <button onclick="sendMessage()">Send</button>
+        </div>
+
+        <script>
+            const chatContainer = document.getElementById('chat-container');
+            const userInput = document.getElementById('user-input');
+
+            marked.setOptions({
+                breaks: true,
+                gfm: true,
+                tables: true,
+                sanitize: false
+            });
+
+            userInput.addEventListener('keypress', function (e) {
+                if (e.key === 'Enter') {
+                    sendMessage();
+                }
+            });
+
+            function addMessage(content, isUser) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${isUser ? 'user-message' : 'ai-message'}`;
+
+                if (isUser) {
+                    messageDiv.textContent = content;
+                } else {
+                    messageDiv.innerHTML = marked.parse(content);
+                }
+
+                chatContainer.appendChild(messageDiv);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+
+            async function sendMessage() {
+                const message = userInput.value.trim();
+                if (!message) return;
+
+                addMessage(message, true);
+                userInput.value = '';
+
+                try {
+                    const response = await fetch('/api/query', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ query: message })
+                    });
+
+                    const data = await response.json();
+                    addMessage(data.response, false);
+                } catch (error) {
+                    addMessage('Sorry, there was an error processing your request.', false);
+                    console.error('Error:', error);
+                }
+            }
+        </script>
+    </body>
+</html>
