@@ -6,44 +6,104 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { exec } from "child_process";
 import { promisify } from "util";
+import os from 'os';
 
 const execAsync = promisify(exec);
+const platform = os.platform();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Platform-specific commands and paths
+const OLLAMA_PATHS = {
+  darwin: "/Applications/Ollama.app/Contents/Resources/ollama",  // Mac
+  win32: "ollama",  // Windows (removed .exe extension)
+  linux: "ollama"  // Linux
+};
+
+const KILL_COMMANDS = {
+  darwin: [
+    "pkill -f Ollama.app",
+    "pkill -f 'ollama serve'",
+    "lsof -ti:11434 | xargs kill -9"
+  ],
+  win32: [
+    "taskkill /F /IM ollama.exe >nul 2>&1",  // Updated Windows commands
+    "for /f \"tokens=5\" %a in ('netstat -ano | find \":11434\"') do taskkill /F /PID %a >nul 2>&1"
+  ],
+  linux: [
+    "pkill -f ollama",
+    "fuser -k 11434/tcp"
+  ]
+};
+
+async function killExistingOllama() {
+  const commands = KILL_COMMANDS[platform] || KILL_COMMANDS.linux;
+  
+  for (const cmd of commands) {
+    try {
+      if (platform === 'win32') {
+        // Use cmd.exe explicitly for Windows commands
+        await execAsync(cmd, { shell: 'cmd.exe' });
+      } else {
+        await execAsync(cmd);
+      }
+    } catch (error) {
+      // Ignore errors from kill commands
+    }
+  }
+}
+
+async function startOllamaProcess() {
+  const ollamaPath = OLLAMA_PATHS[platform] || OLLAMA_PATHS.linux;
+  let command;
+  
+  if (platform === 'win32') {
+    // On Windows, we need to use a different command structure
+    command = `start /B ${ollamaPath} serve`;
+  } else {
+    command = `${ollamaPath} serve`;
+  }
+  
+  return exec(command, { 
+    maxBuffer: 1024 * 1024 * 10,
+    windowsHide: true,
+    shell: platform === 'win32' ? 'cmd.exe' : '/bin/sh'
+  });
+}
+
 async function restartOllama() {
   try {
-    // Kill both the app and the serve process
+    console.log("Checking Ollama status...");
+    
+    const ollamaService = new OllamaService();
+    
+    // Try to connect first - Ollama might already be running
+    try {
+      if (await ollamaService.verifyConnection()) {
+        console.log("Ollama is already running and responding");
+        return null;
+      }
+    } catch (error) {
+      console.log("Ollama not responding, attempting restart...");
+      
+      // On Windows, we need to ensure the port is actually free
+      if (platform === 'win32') {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await killExistingOllama();
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+
     console.log("Stopping existing Ollama processes...");
+    await killExistingOllama();
 
-    // Kill Ollama.app process
-    await execAsync("pkill -f Ollama.app").catch(() => {
-      // Ignore error if no process found
-    });
+    // Wait longer on Windows for processes to clean up
+    const cleanupDelay = platform === 'win32' ? 3000 : 2000;
+    await new Promise(resolve => setTimeout(resolve, cleanupDelay));
 
-    // Kill any ollama serve processes
-    await execAsync("pkill -f 'ollama serve'").catch(() => {
-      // Ignore error if no process found
-    });
-
-    // Force kill any remaining processes on port 11434
-    await execAsync("lsof -ti:11434 | xargs kill -9").catch(() => {
-      // Ignore error if no process found
-    });
-
-    // Wait longer for processes to clean up
-    console.log("Waiting for processes to clean up...");
-    await new Promise((resolve) => setTimeout(resolve, 5000)); // Increased to 5 seconds
-
-    // Start new Ollama instance
     console.log("Starting new Ollama instance...");
-    const ollamaProcess = exec(
-      "/Applications/Ollama.app/Contents/Resources/ollama serve",
-      { maxBuffer: 1024 * 1024 * 10 } // Increase buffer size to 10MB
-    );
-
-    let serverError = null;
+    const ollamaProcess = await startOllamaProcess();
 
     // Log Ollama output
     ollamaProcess.stdout?.on("data", (data) => {
@@ -56,36 +116,24 @@ async function restartOllama() {
     ollamaProcess.stderr?.on("data", (data) => {
       const message = data.toString().trim();
       if (message.includes("error") && !message.includes("llama_")) {
-        serverError = message;
         console.error("Ollama Error:", message);
       }
     });
 
-    // Wait for Ollama to be ready and verify connection
+    // Wait for Ollama to be ready
     let retries = 0;
-    const maxRetries = 15; // Increased retries
-    const retryDelay = 3000; // 3 seconds between retries
+    const maxRetries = 10;
+    const retryDelay = 2000;
 
     while (retries < maxRetries) {
-      await new Promise((resolve) => setTimeout(resolve, retryDelay));
-
-      if (serverError) {
-        console.error("Server encountered an error:", serverError);
-        throw new Error(serverError);
-      }
-
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
       try {
-        const ollamaService = new OllamaService();
         if (await ollamaService.verifyConnection()) {
           console.log("Successfully connected to Ollama");
           return ollamaProcess;
         }
       } catch (error) {
-        console.log(
-          `Retry ${
-            retries + 1
-          }/${maxRetries}: Waiting for Ollama to be ready... (${error.message})`
-        );
+        console.log(`Retry ${retries + 1}/${maxRetries}: Waiting for Ollama...`);
       }
       retries++;
     }
@@ -169,32 +217,30 @@ app.post("/api/query", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-// Add a cleanup function for process termination
+// Update the cleanup function
 function setupCleanup(ollamaProcess) {
   const cleanup = async () => {
     console.log("\nShutting down server...");
     if (ollamaProcess) {
       ollamaProcess.kill();
-      // Additional cleanup
-      await execAsync("pkill -f 'ollama serve'").catch(() => {});
-      await execAsync("lsof -ti:11434 | xargs kill -9").catch(() => {});
+      // Give the process a moment to clean up
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
     process.exit(0);
   };
 
-  // Handle different termination signals
   process.on("SIGINT", cleanup);
   process.on("SIGTERM", cleanup);
   process.on("SIGUSR2", cleanup); // For nodemon restart
 }
 
-// Update the startServer function
 async function startServer() {
   try {
     const ollamaProcess = await restartOllama();
-
-    // Set up cleanup handlers
-    setupCleanup(ollamaProcess);
+    
+    if (ollamaProcess) {
+      setupCleanup(ollamaProcess);
+    }
 
     app.listen(PORT, () => {
       console.log(`Financial AI agent running on port ${PORT}`);
