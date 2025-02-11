@@ -5,6 +5,10 @@ A web application for analyzing financial transactions, providing insights into 
 ![Screenshot 2025-01-26 at 6 41 38 PM](https://github.com/user-attachments/assets/86b6ae13-9c16-4fd7-ae0e-18d5d7311ebf)
 
 
+https://github.com/user-attachments/assets/c3c3b51e-353a-49de-bd73-8ec8459adf1c
+
+
+
 ## Features
 
 - Subscription tracking and analysis
